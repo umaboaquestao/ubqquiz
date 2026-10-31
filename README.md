@@ -28,7 +28,7 @@ Para que uma alteração do administrador apareça automaticamente para todos os
 
 Antes de publicar este modo, executar [open-quiz-migration.sql](./open-quiz-migration.sql) no SQL Editor do projeto Supabase usado pelo Live. A migração cria tabelas próprias e não altera as salas Live.
 
-- Administração: `aberto/?admin` (também disponível em `quiz/aberto/?admin` no site TIMIlândia).
+- Administração: `https://umaboaquestao.github.io/ubqquiz/aberto/?admin`.
 - O administrador escolhe o quiz e a duração (1 h, 6 h, 24 h, 3 dias, 7 dias ou data/hora personalizada).
 - Partilhar o link com o código da sala que aparece na classificação.
 - Cada pessoa responde ao seu ritmo até ao prazo. Neste modo não há cronómetro por pergunta; cada resposta certa vale 100 pontos.
