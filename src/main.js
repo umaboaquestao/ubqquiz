@@ -4,10 +4,12 @@ import { questions as defaultQuestions } from './questions.js';
 const app = document.querySelector('#app');
 const storageKey = 'ubq-quiz-questions-v1';
 const sessionsKey = 'ubq-quiz-sessions-v1';
+const activeSessionKey = 'ubq-quiz-active-session-v1';
 const resultsKey = 'ubq-quiz-results-v1';
 const adminPassword = '654321';
 const adminSessionKey = 'ubq-quiz-admin-access';
 let quizQuestions = loadQuestions();
+let activeSessionName = localStorage.getItem(activeSessionKey) || '';
 let currentQuestion = 0;
 let score = 0;
 let playerName = '';
@@ -27,11 +29,40 @@ function loadQuestions() {
   try { const saved = JSON.parse(localStorage.getItem(storageKey)); if (Array.isArray(saved)) { const valid = saved.map(normalizeQuestion).filter(Boolean); if (valid.length) return valid; } } catch { /* defaults */ }
   return clone(defaultQuestions);
 }
-function saveQuestions() { localStorage.setItem(storageKey, JSON.stringify(quizQuestions)); }
+function saveQuestions() {
+  localStorage.setItem(storageKey, JSON.stringify(quizQuestions));
+  if (!activeSessionName) return;
+  const sessions = loadSessions();
+  const session = sessions.find(item => item.name === activeSessionName);
+  if (!session) { setActiveSession(''); return; }
+  session.questions = clone(quizQuestions);
+  session.updatedAt = new Date().toISOString();
+  localStorage.setItem(sessionsKey, JSON.stringify(sessions));
+}
+function setActiveSession(name) { activeSessionName = name; localStorage.setItem(activeSessionKey, name); }
+function renderSessionSelector() {
+  const sessions = loadSessions();
+  if (!sessions.some(session => session.name === activeSessionName)) setActiveSession('');
+  const panel = document.querySelector('#session-selector');
+  panel.innerHTML = `<label for="session-to-edit">Escolher sessão para editar</label><select id="session-to-edit"><option value="">${activeSessionName ? 'Escolher outra sessão…' : 'Perguntas atuais (sem sessão selecionada)'}</option>${sessions.map((session, index) => `<option value="${index}" ${session.name === activeSessionName ? 'selected' : ''}>${escapeHtml(session.name)}</option>`).join('')}</select><p id="active-session-status" role="status">${activeSessionName ? `A editar: <strong>${escapeHtml(activeSessionName)}</strong>. As alterações são guardadas automaticamente nesta sessão.` : sessions.length ? 'Seleciona uma sessão para carregar as suas perguntas.' : 'Ainda não há sessões. Importa um PDF/JSON ou usa Guardar sessão.'}</p>`;
+  panel.querySelector('#session-to-edit').addEventListener('change', event => {
+    if (event.target.value === '') { setActiveSession(''); renderSessionSelector(); return; }
+    const selected = sessions[Number(event.target.value)];
+    const current = loadSessions().find(session => session.name === selected?.name);
+    const valid = Array.isArray(current?.questions) ? current.questions.map(normalizeQuestion) : [];
+    if (!valid.length || valid.some(question => !question)) {
+      window.alert('Esta sessão não contém perguntas válidas.'); renderSessionSelector(); return;
+    }
+    quizQuestions = clone(valid);
+    setActiveSession(current.name);
+    saveQuestions();
+    renderAdmin();
+  });
+}
 function loadSessions() { try { const saved = JSON.parse(localStorage.getItem(sessionsKey)); return Array.isArray(saved) ? saved : []; } catch { return []; } }
 function loadResults() { try { const saved = JSON.parse(localStorage.getItem(resultsKey)); return Array.isArray(saved) ? saved : []; } catch { return []; } }
 function saveIndividualResult() { const results = loadResults(); results.unshift({ name: playerName || 'Ciclista', score, total: quizQuestions.length, completedAt: new Date().toISOString() }); localStorage.setItem(resultsKey, JSON.stringify(results).slice(0, 50000)); }
-function saveSession() { const name = window.prompt('Nome da sessão de quiz:', `Sessão ${new Date().toLocaleDateString('pt-PT')}`)?.trim(); if (!name) return; const sessions = loadSessions().filter(session => session.name !== name); sessions.push({ name, questions: clone(quizQuestions), updatedAt: new Date().toISOString() }); localStorage.setItem(sessionsKey, JSON.stringify(sessions)); renderSavedSessions(); document.querySelector('#save-status').textContent = `Sessão “${name}” guardada.`; }
+function saveSession() { const name = window.prompt('Nome da sessão de quiz:', activeSessionName || `Sessão ${new Date().toLocaleDateString('pt-PT')}`)?.trim(); if (!name) return; const sessions = loadSessions().filter(session => session.name !== name); sessions.push({ name, questions: clone(quizQuestions), updatedAt: new Date().toISOString() }); localStorage.setItem(sessionsKey, JSON.stringify(sessions)); setActiveSession(name); renderSavedSessions(); renderSessionSelector(); document.querySelector('#save-status').textContent = `Sessão “${name}” guardada.`; }
 function exportSession() { const name = window.prompt('Nome do ficheiro da sessão:', 'ubq-sessao-quiz')?.trim() || 'ubq-sessao-quiz'; const payload = { type: 'ubq-quiz-session', name, questions: quizQuestions, updatedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${name.replace(/[^a-z0-9-_]+/gi, '-')}.json`; link.click(); URL.revokeObjectURL(url); }
 function parseOcrSession(data) { const items = Array.isArray(data?.detail) ? data.detail : Array.isArray(data?.pages) ? data.pages.flatMap(page => page.content || []) : []; return parseQuestionText(items.map(item => String(item.text || '')).join('\n')); }
 function parseTextSession(text) { return parseQuestionText(text); }
@@ -74,8 +105,9 @@ function renderAdminLogin() {
 }
 function renderAdmin() {
   clearInterval(timerId);
-  const results = loadResults(); app.innerHTML = `<div class="shell admin-shell">${brand()}<header class="admin-header"><div><div class="eyebrow">Área de administração</div><h1>Perguntas do quiz</h1><p>Altera, adiciona ou remove perguntas e guarda sessões para usar no Live.</p></div><a class="secondary-button" href="${escapeHtml(quizUrl())}">Ver quiz →</a></header><div class="admin-actions"><a class="secondary-button" href="./aberto/?admin">Sala com prazo</a><button id="add-question" class="primary-button" type="button">+ Adicionar pergunta</button><button id="save-session" class="secondary-button" type="button">Guardar sessão</button><button id="export-session" class="secondary-button" type="button">Exportar sessão JSON</button><label class="secondary-button import-label">Importar sessão PDF/JSON<input id="import-session" type="file" accept="application/pdf,application/json,.pdf,.json" hidden /></label><button id="export-questions" class="secondary-button" type="button">Exportar perguntas</button><label class="secondary-button import-label">Importar perguntas<input id="import-questions" type="file" accept="application/json" hidden /></label><button id="delete-session" class="text-button" type="button">Apagar sessão</button></div><p class="save-status" id="save-status">${quizQuestions.length} perguntas guardadas neste browser.</p><dialog id="saved-sessions" class="session-dialog" aria-labelledby="saved-sessions-title"></dialog><section class="results-panel"><div class="eyebrow">Resultados individuais</div><h2>Jogadores concluídos</h2><ol>${results.map(result => `<li><span>${escapeHtml(result.name)} · ${new Date(result.completedAt).toLocaleString('pt-PT')}</span><strong>${result.score} pts</strong></li>`).join('') || '<li>Ainda não há resultados.</li>'}</ol></section><section id="question-editor" class="question-editor"></section></div>`;
+  const results = loadResults(); app.innerHTML = `<div class="shell admin-shell">${brand()}<header class="admin-header"><div><div class="eyebrow">Área de administração</div><h1>Perguntas do quiz</h1><p>Altera, adiciona ou remove perguntas e guarda sessões para usar no Live.</p></div><a class="secondary-button" href="${escapeHtml(quizUrl())}">Ver quiz →</a></header><section id="session-selector" class="session-selector"></section><div class="admin-actions"><a class="secondary-button" href="./aberto/?admin">Sala com prazo</a><button id="add-question" class="primary-button" type="button">+ Adicionar pergunta</button><button id="save-session" class="secondary-button" type="button">Guardar sessão</button><button id="export-session" class="secondary-button" type="button">Exportar sessão JSON</button><label class="secondary-button import-label">Importar sessão PDF/JSON<input id="import-session" type="file" accept="application/pdf,application/json,.pdf,.json" hidden /></label><button id="export-questions" class="secondary-button" type="button">Exportar perguntas</button><label class="secondary-button import-label">Importar perguntas<input id="import-questions" type="file" accept="application/json" hidden /></label><button id="delete-session" class="text-button" type="button">Apagar sessão</button></div><p class="save-status" id="save-status">${quizQuestions.length} perguntas guardadas neste browser.</p><dialog id="saved-sessions" class="session-dialog" aria-labelledby="saved-sessions-title"></dialog><section class="results-panel"><div class="eyebrow">Resultados individuais</div><h2>Jogadores concluídos</h2><ol>${results.map(result => `<li><span>${escapeHtml(result.name)} · ${new Date(result.completedAt).toLocaleString('pt-PT')}</span><strong>${result.score} pts</strong></li>`).join('') || '<li>Ainda não há resultados.</li>'}</ol></section><section id="question-editor" class="question-editor"></section></div>`;
   renderSavedSessions();
+  renderSessionSelector();
   renderQuestionEditor();
   document.querySelector('#add-question').addEventListener('click', () => { quizQuestions.push({ question: 'Nova pergunta', answers: ['Resposta A', 'Resposta B', 'Resposta C', 'Resposta D'], correct: 0, time: 20 }); saveQuestions(); renderAdmin(); });
   document.querySelector('#save-session').addEventListener('click', saveSession);
@@ -104,8 +136,10 @@ function renderSavedSessions() {
       }
       currentSessions.splice(index, 1);
       localStorage.setItem(sessionsKey, JSON.stringify(currentSessions));
+      if (session.name === activeSessionName) setActiveSession('');
       panel.close();
       renderSavedSessions();
+      renderSessionSelector();
       document.querySelector('#save-status').textContent = `Sessão "${session.name}" apagada.`;
     } catch {
       window.alert('Não foi possível apagar a sessão. Tenta novamente.');
@@ -120,8 +154,8 @@ function renderQuestionEditor() {
 }
 function handleEditorChange(event) { const field = event.target.dataset.field; if (!field) return; const index = Number(event.target.closest('.editor-card').dataset.index); const question = quizQuestions[index]; if (field === 'answer') question.answers[Number(event.target.dataset.answerIndex)] = event.target.value; else if (field === 'correct' || field === 'time') question[field] = Number(event.target.value); else question[field] = event.target.value; saveQuestions(); document.querySelector('#save-status').textContent = `Alterações guardadas · ${quizQuestions.length} perguntas.`; }
 function exportQuestions() { const blob = new Blob([JSON.stringify(quizQuestions, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'ubq-quiz-perguntas.json'; link.click(); URL.revokeObjectURL(url); }
-function importQuestions(event) { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const loaded = JSON.parse(reader.result); const valid = Array.isArray(loaded) ? loaded.map(normalizeQuestion).filter(Boolean) : []; if (!valid.length || valid.length !== loaded.length) throw new Error(); quizQuestions = valid; saveQuestions(); renderAdmin(); } catch { window.alert('O ficheiro não contém perguntas válidas.'); } }; reader.readAsText(file); }
-async function importSession(event) { const file = event.target.files[0]; if (!file) return; try { const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name); const raw = isPdf ? parseTextSession(await extractPdfText(file)) : JSON.parse(await file.text()); const loaded = isPdf ? null : raw; const source = Array.isArray(raw) ? raw : raw?.questions; const imported = source || (isPdf ? raw : parseOcrSession(raw)); const questions = imported.map(normalizeQuestion).filter(Boolean); if (!questions.length || questions.length !== imported.length) throw new Error(); quizQuestions = questions; saveQuestions(); const name = loaded?.name || (isPdf ? file.name.replace(/\.pdf$/i, '') : 'Quiz UBQ importado'); const sessions = loadSessions().filter(session => session.name !== name); sessions.push({ name, questions, updatedAt: new Date().toISOString() }); localStorage.setItem(sessionsKey, JSON.stringify(sessions)); renderAdmin(); } catch (error) { window.alert('Não foi possível importar este PDF/JSON como sessão de quiz.' + (error?.message ? '\n' + error.message : '')); } finally { event.target.value = ''; } }
+function importQuestions(event) { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const loaded = JSON.parse(reader.result); const valid = Array.isArray(loaded) ? loaded.map(normalizeQuestion).filter(Boolean) : []; if (!valid.length || valid.length !== loaded.length) throw new Error(); setActiveSession(''); quizQuestions = valid; saveQuestions(); renderAdmin(); } catch { window.alert('O ficheiro não contém perguntas válidas.'); } }; reader.readAsText(file); }
+async function importSession(event) { const file = event.target.files[0]; if (!file) return; try { const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name); const raw = isPdf ? parseTextSession(await extractPdfText(file)) : JSON.parse(await file.text()); const loaded = isPdf ? null : raw; const source = Array.isArray(raw) ? raw : raw?.questions; const imported = source || (isPdf ? raw : parseOcrSession(raw)); const questions = imported.map(normalizeQuestion).filter(Boolean); if (!questions.length || questions.length !== imported.length) throw new Error(); setActiveSession(''); quizQuestions = questions; saveQuestions(); const name = loaded?.name || (isPdf ? file.name.replace(/\.pdf$/i, '') : 'Quiz UBQ importado'); const sessions = loadSessions().filter(session => session.name !== name); sessions.push({ name, questions, updatedAt: new Date().toISOString() }); localStorage.setItem(sessionsKey, JSON.stringify(sessions)); setActiveSession(name); renderAdmin(); } catch (error) { window.alert('Não foi possível importar este PDF/JSON como sessão de quiz.' + (error?.message ? '\n' + error.message : '')); } finally { event.target.value = ''; } }
 if (new URLSearchParams(window.location.search).has('admin')) {
   if (sessionStorage.getItem(adminSessionKey) === 'true') renderAdmin(); else renderAdminLogin();
 } else renderHome();

@@ -5,3 +5,5 @@
 
 
 .session-dialog{width:min(560px,calc(100% - 32px));max-height:85vh;overflow:auto;padding:28px;border:2px solid #171717;background:#fffdf8;color:#171717}.session-dialog::backdrop{background:rgba(0,0,0,.45)}.session-dialog p{line-height:1.5}.session-dialog-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:16px;margin-top:24px}.session-dialog .delete-button{color:#a52d1c;border:1px solid currentColor;padding:12px}.session-dialog .delete-button:disabled{opacity:.5;cursor:default}
+
+.session-selector{margin:0 0 28px;padding:20px;border:2px solid #171717;background:#fffdf8}.session-selector label{margin-top:0}.session-selector p{font-size:14px;line-height:1.5;margin-bottom:0}
