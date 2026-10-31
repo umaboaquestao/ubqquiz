@@ -30,7 +30,7 @@ function saveQuestions() { localStorage.setItem(storageKey, JSON.stringify(quizQ
 function loadSessions() { try { const saved = JSON.parse(localStorage.getItem(sessionsKey)); return Array.isArray(saved) ? saved : []; } catch { return []; } }
 function loadResults() { try { const saved = JSON.parse(localStorage.getItem(resultsKey)); return Array.isArray(saved) ? saved : []; } catch { return []; } }
 function saveIndividualResult() { const results = loadResults(); results.unshift({ name: playerName || 'Ciclista', score, total: quizQuestions.length, completedAt: new Date().toISOString() }); localStorage.setItem(resultsKey, JSON.stringify(results).slice(0, 50000)); }
-function saveSession() { const name = window.prompt('Nome da sessão de quiz:', `Sessão ${new Date().toLocaleDateString('pt-PT')}`)?.trim(); if (!name) return; const sessions = loadSessions().filter(session => session.name !== name); sessions.push({ name, questions: clone(quizQuestions), updatedAt: new Date().toISOString() }); localStorage.setItem(sessionsKey, JSON.stringify(sessions)); document.querySelector('#save-status').textContent = `Sessão “${name}” guardada.`; }
+function saveSession() { const name = window.prompt('Nome da sessão de quiz:', `Sessão ${new Date().toLocaleDateString('pt-PT')}`)?.trim(); if (!name) return; const sessions = loadSessions().filter(session => session.name !== name); sessions.push({ name, questions: clone(quizQuestions), updatedAt: new Date().toISOString() }); localStorage.setItem(sessionsKey, JSON.stringify(sessions)); renderSavedSessions(); document.querySelector('#save-status').textContent = `Sessão “${name}” guardada.`; }
 function exportSession() { const name = window.prompt('Nome do ficheiro da sessão:', 'ubq-sessao-quiz')?.trim() || 'ubq-sessao-quiz'; const payload = { type: 'ubq-quiz-session', name, questions: quizQuestions, updatedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${name.replace(/[^a-z0-9-_]+/gi, '-')}.json`; link.click(); URL.revokeObjectURL(url); }
 function parseOcrSession(data) { const items = Array.isArray(data?.detail) ? data.detail : Array.isArray(data?.pages) ? data.pages.flatMap(page => page.content || []) : []; const parsed = []; let current = null; for (const item of items) { const text = String(item.text || '').trim(); if (!text || /^Quiz\s+TIMI/i.test(text)) continue; const questionMatch = text.match(/^\d+\.\s*(.+)$/); const answerMatch = text.match(/^([A-D])\)\s*(.+)$/i); if (questionMatch) { if (current) parsed.push(current); current = { question: questionMatch[1].trim(), answers: [], correct: 0, time: 20 }; } else if (answerMatch && current) { current.answers[answerMatch[1].toUpperCase().charCodeAt(0) - 65] = answerMatch[2].trim(); } else if (current && !current.answers.length) { current.question += ` ${text}`; } else if (current && current.answers.length < 4) { const last = current.answers.length - 1; current.answers[last] = `${current.answers[last]} ${text}`.trim(); } } if (current) parsed.push(current); return parsed.filter(question => question.question && question.answers.length === 4 && question.answers.every(Boolean)); }
 function parseTextSession(text) { return parseOcrSession({ detail: text.split(/\r?\n/).map((line, index) => ({ id: index, text: line })) }); }
@@ -73,7 +73,8 @@ function renderAdminLogin() {
 }
 function renderAdmin() {
   clearInterval(timerId);
-  const results = loadResults(); app.innerHTML = `<div class="shell admin-shell">${brand()}<header class="admin-header"><div><div class="eyebrow">Área de administração</div><h1>Perguntas do quiz</h1><p>Altera, adiciona ou remove perguntas e guarda sessões para usar no Live.</p></div><a class="secondary-button" href="${escapeHtml(quizUrl())}">Ver quiz →</a></header><div class="admin-actions"><button id="add-question" class="primary-button" type="button">+ Adicionar pergunta</button><button id="save-session" class="secondary-button" type="button">Guardar sessão</button><button id="export-session" class="secondary-button" type="button">Exportar sessão JSON</button><label class="secondary-button import-label">Importar sessão PDF/JSON<input id="import-session" type="file" accept="application/pdf,application/json,.pdf,.json" hidden /></label><button id="export-questions" class="secondary-button" type="button">Exportar perguntas</button><label class="secondary-button import-label">Importar perguntas<input id="import-questions" type="file" accept="application/json" hidden /></label><button id="reset-questions" class="text-button" type="button">Repor originais</button></div><p class="save-status" id="save-status">${quizQuestions.length} perguntas guardadas neste browser.</p><section class="results-panel"><div class="eyebrow">Resultados individuais</div><h2>Jogadores concluídos</h2><ol>${results.map(result => `<li><span>${escapeHtml(result.name)} · ${new Date(result.completedAt).toLocaleString('pt-PT')}</span><strong>${result.score} pts</strong></li>`).join('') || '<li>Ainda não há resultados.</li>'}</ol></section><section id="question-editor" class="question-editor"></section></div>`;
+  const results = loadResults(); app.innerHTML = `<div class="shell admin-shell">${brand()}<header class="admin-header"><div><div class="eyebrow">Área de administração</div><h1>Perguntas do quiz</h1><p>Altera, adiciona ou remove perguntas e guarda sessões para usar no Live.</p></div><a class="secondary-button" href="${escapeHtml(quizUrl())}">Ver quiz →</a></header><div class="admin-actions"><a class="secondary-button" href="./aberto/?admin">Sala com prazo</a><button id="add-question" class="primary-button" type="button">+ Adicionar pergunta</button><button id="save-session" class="secondary-button" type="button">Guardar sessão</button><button id="export-session" class="secondary-button" type="button">Exportar sessão JSON</button><label class="secondary-button import-label">Importar sessão PDF/JSON<input id="import-session" type="file" accept="application/pdf,application/json,.pdf,.json" hidden /></label><button id="export-questions" class="secondary-button" type="button">Exportar perguntas</button><label class="secondary-button import-label">Importar perguntas<input id="import-questions" type="file" accept="application/json" hidden /></label><button id="delete-session" class="text-button" type="button">Apagar sessão</button></div><p class="save-status" id="save-status">${quizQuestions.length} perguntas guardadas neste browser.</p><dialog id="saved-sessions" class="session-dialog" aria-labelledby="saved-sessions-title"></dialog><section class="results-panel"><div class="eyebrow">Resultados individuais</div><h2>Jogadores concluídos</h2><ol>${results.map(result => `<li><span>${escapeHtml(result.name)} · ${new Date(result.completedAt).toLocaleString('pt-PT')}</span><strong>${result.score} pts</strong></li>`).join('') || '<li>Ainda não há resultados.</li>'}</ol></section><section id="question-editor" class="question-editor"></section></div>`;
+  renderSavedSessions();
   renderQuestionEditor();
   document.querySelector('#add-question').addEventListener('click', () => { quizQuestions.push({ question: 'Nova pergunta', answers: ['Resposta A', 'Resposta B', 'Resposta C', 'Resposta D'], correct: 0, time: 20 }); saveQuestions(); renderAdmin(); });
   document.querySelector('#save-session').addEventListener('click', saveSession);
@@ -81,7 +82,34 @@ function renderAdmin() {
   document.querySelector('#import-session').addEventListener('change', importSession);
   document.querySelector('#export-questions').addEventListener('click', exportQuestions);
   document.querySelector('#import-questions').addEventListener('change', importQuestions);
-  document.querySelector('#reset-questions').addEventListener('click', () => { if (window.confirm('Repor as perguntas originais? As alterações deste browser serão substituídas.')) { quizQuestions = clone(defaultQuestions); saveQuestions(); renderAdmin(); } });
+  document.querySelector('#delete-session').addEventListener('click', () => { renderSavedSessions(); document.querySelector('#saved-sessions').showModal(); });
+}
+function renderSavedSessions() {
+  const panel = document.querySelector('#saved-sessions');
+  const sessions = loadSessions();
+  panel.innerHTML = `<h2 id="saved-sessions-title">Apagar sessão</h2><p>Escolhe a sessão a apagar deste navegador. As perguntas atuais no editor mantêm-se.</p>${sessions.length ? `<label for="session-to-delete">Sessão</label><select id="session-to-delete">${sessions.map((session, index) => `<option value="${index}">${escapeHtml(session.name)} (${Array.isArray(session.questions) ? session.questions.length : 0} perguntas)</option>`).join('')}</select>` : '<p>Ainda não há sessões guardadas.</p>'}<div class="session-dialog-actions"><button id="cancel-delete-session" class="secondary-button" type="button">Cancelar</button><button id="confirm-delete-session" class="delete-button" type="button" ${sessions.length ? '' : 'disabled'}>Apagar sessão</button></div><p id="session-delete-status" role="status"></p>`;
+  panel.querySelector('#cancel-delete-session').addEventListener('click', () => panel.close());
+  panel.querySelector('#confirm-delete-session').addEventListener('click', () => {
+    const index = Number(panel.querySelector('#session-to-delete')?.value);
+    const session = sessions[index];
+    if (!session) return;
+    if (!window.confirm(`Apagar a sessão "${session.name}" deste navegador? Esta ação não pode ser desfeita.`)) return;
+    try {
+      const currentSessions = loadSessions();
+      if (JSON.stringify(currentSessions) !== JSON.stringify(sessions)) {
+        renderSavedSessions();
+        panel.querySelector('#session-delete-status').textContent = 'A lista de sessões foi alterada. Seleciona novamente a sessão a apagar.';
+        return;
+      }
+      currentSessions.splice(index, 1);
+      localStorage.setItem(sessionsKey, JSON.stringify(currentSessions));
+      panel.close();
+      renderSavedSessions();
+      document.querySelector('#save-status').textContent = `Sessão "${session.name}" apagada.`;
+    } catch {
+      window.alert('Não foi possível apagar a sessão. Tenta novamente.');
+    }
+  });
 }
 function renderQuestionEditor() {
   const editor = document.querySelector('#question-editor');
