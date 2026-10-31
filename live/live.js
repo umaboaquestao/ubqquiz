@@ -15,7 +15,7 @@ function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshT
 function sessionProgress(session) { return session.status === 'finished' ? 2 : session.status === 'question' ? 1 : 0; }
 function makeCode() { return `UBQ${Math.random().toString(36).slice(2, 6).toUpperCase()}`; }
 function loadSessions() { try { const saved = JSON.parse(localStorage.getItem('ubq-quiz-sessions-v1')); return Array.isArray(saved) ? saved : []; } catch { return []; } }
-function availableQuizzes() { const saved = questions(); const sessions = loadSessions().filter(session => Array.isArray(session.questions) && session.questions.length); return [{ id: 'original', name: 'Quiz UBQ original', description: 'As perguntas oficiais do Quiz UBQ.', questions: defaultQuestions }, ...(saved.length && JSON.stringify(saved) !== JSON.stringify(defaultQuestions) ? [{ id: 'browser', name: 'Perguntas atuais do browser', description: 'As perguntas atualmente configuradas.', questions: saved }] : []), ...sessions.map((session, index) => ({ id: `session-${index}`, name: session.name, description: `${session.questions.length} perguntas guardadas nesta sessão.`, questions: session.questions }))]; }
+function availableQuizzes() { const saved = questions(); const sessions = loadSessions().filter(session => Array.isArray(session.questions) && session.questions.length); return [{ id: 'original', name: 'Quiz UBQ original', description: 'As perguntas oficiais do Quiz UBQ.', questions: defaultQuestions }, ...(saved.length && JSON.stringify(saved) !== JSON.stringify(defaultQuestions) ? [{ id: 'browser', name: 'Perguntas atuais do browser', description: 'As perguntas atualmente configuradas.', questions: saved }] : []), ...sessions.map((session, index) => ({ id: `session-${encodeURIComponent(session.name)}`, name: session.name, description: `${session.questions.length} perguntas guardadas nesta sessão.`, questions: session.questions }))]; }
 
 function home(message = '') {
   stopSubscription(); isHost = false; liveSession = null; player = null;
@@ -36,9 +36,23 @@ function login(message = '') {
 }
 function hostSetup() {
   isHost = true; const quizzes = availableQuizzes(); app.innerHTML = `<div class="shell result-shell">${brand()}<main class="result-card"><div class="eyebrow">Anfitrião</div><h1>Criar sala</h1><p>Escolhe o quiz desta sessão.</p><a class="secondary-button" href="../aberto/?admin">Sala com prazo</a><form id="quiz-choice"><label for="quiz-select">Quiz</label><select id="quiz-select">${quizzes.map(quiz => `<option value="${quiz.id}">${escapeHtml(quiz.name)} (${quiz.questions.length} perguntas)</option>`).join('')}</select><p id="quiz-description" class="prototype-note">${escapeHtml(quizzes[0].description)}</p><button class="primary-button">Criar sala live <b>→</b></button></form><section id="live-history" class="results-panel"><div class="eyebrow">Histórico Live</div><h2>Quizzes terminados</h2><p>A carregar resultados...</p></section></main></div>`;
-  const select = document.querySelector('#quiz-select'); const description = document.querySelector('#quiz-description'); select.addEventListener('change', () => { description.textContent = quizzes.find(quiz => quiz.id === select.value).description; }); document.querySelector('#quiz-choice').addEventListener('submit', createRoom);
+  const select = document.querySelector('#quiz-select'); select.addEventListener('change', refreshQuizChoices); document.querySelector('#quiz-choice').addEventListener('submit', createRoom);
   loadLiveHistory();
 }
+function refreshQuizChoices() {
+  const select = document.querySelector('#quiz-select');
+  if (!select) return;
+  const selectedId = select.value;
+  const quizzes = availableQuizzes();
+  select.innerHTML = quizzes.map(quiz => `<option value="${escapeHtml(quiz.id)}">${escapeHtml(quiz.name)} (${quiz.questions.length} perguntas)</option>`).join('');
+  select.value = quizzes.some(quiz => quiz.id === selectedId) ? selectedId : quizzes[0].id;
+  document.querySelector('#quiz-description').textContent = quizzes.find(quiz => quiz.id === select.value).description;
+}
+window.addEventListener('storage', event => {
+  if (event.storageArea === localStorage && (event.key === null || ['ubq-quiz-sessions-v1', 'ubq-quiz-questions-v1'].includes(event.key))) refreshQuizChoices();
+});
+window.addEventListener('focus', refreshQuizChoices);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshQuizChoices(); });
 async function loadLiveHistory() { const supabase = await db(); const { data: sessions = [] } = await supabase.from('quiz_sessions').select('id, room_code, status, created_at').eq('status', 'finished').order('created_at', { ascending: false }).limit(20); const history = document.querySelector('#live-history'); if (!history) return; if (!sessions.length) return void (history.innerHTML = '<div class="eyebrow">Histórico Live</div><h2>Quizzes terminados</h2><p>Ainda não há resultados.</p>'); const groups = await Promise.all(sessions.map(async session => { const { data: players = [] } = await supabase.from('quiz_players').select('name, score').eq('session_id', session.id).order('score', { ascending: false }); return `<article><strong>Sala ${escapeHtml(session.room_code)}</strong><small>${new Date(session.created_at).toLocaleString('pt-PT')}</small><ol>${players.map(player => `<li><span>${escapeHtml(player.name)}</span><strong>${player.score} pts</strong></li>`).join('') || '<li>Sem participantes</li>'}</ol></article>`; })); history.innerHTML = `<div class="eyebrow">Histórico Live</div><h2>Quizzes terminados</h2>${groups.join('')}`; }
 async function createRoom(event) {
   event.preventDefault(); const selected = availableQuizzes().find(quiz => quiz.id === document.querySelector('#quiz-select').value) || availableQuizzes()[0]; const supabase = await db(); const { data, error } = await supabase.from('quiz_sessions').insert({ room_code: makeCode(), host_token: crypto.randomUUID(), questions: selected.questions, status: 'lobby' }).select().single();
